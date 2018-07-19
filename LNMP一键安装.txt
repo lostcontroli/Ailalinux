@@ -1,0 +1,103 @@
+#!/bin/bash
+set -e                                                                                                                          #监控脚本状态出错立即停止
+#####################################################################过滤操作系统#####################################################################
+check_sys(){
+if [[ -f /etc/redhat-release ]]; then
+        release="centos"
+elif cat /etc/issue | grep -q -E -i "debian"; then
+        release="debian"
+elif cat /etc/issue | grep -q -E -i "ubuntu"; then
+        release="ubuntu"
+elif cat /etc/issue | grep -q -E -i "centos|red hat|redhat"; then
+        release="centos"
+elif cat /proc/version | grep -q -E -i "debian"; then
+        release="debian"
+elif cat /proc/version | grep -q -E -i "ubuntu"; then
+        release="ubuntu"
+elif cat /proc/version | grep -q -E -i "centos|red hat|redhat"; then
+release="centos"
+fi
+}
+check_sys
+echo "$release"
+#######################################################################Centos-Nginx####################################################################
+user='nginx'
+group='nginx'
+user_exists=$(id -nu $user)
+if [ !$user_exists ];then
+/usr/sbin/groupadd -f $group
+/usr/sbin/useradd -g $group $user -s /sbin/nologin -M
+fi
+cd /etc/yum.repos.d/                                                                                                            #切换到本地yum源目录
+wget  -O /etc/yum.repos.d/CentOS-Base.repo  http://mirrors.aliyun.com/repo/Centos-6.repo                                        #下载163yum源
+yum clean all && yum makecache                                                                                                  #清空并生成缓存
+yum -y install gcc* pcre-devel zlib-devel                                                                                       #安装编译工具及nginx依赖
+wget http://nginx.org/download/nginx-1.8.1.tar.gz                                                                               #从官网下载nginx软件包
+tar -xf nginx-1.8.1.tar.gz && cd nginx-1.8.1                                                                                    #解压并切换到软件目录
+./configure --prefix=/usr/local/nginx --user=nginx --group=nginx --with-http_stub_status_module                                 #编译
+if [$? -ne 0];then return $?                                                                                                    #返回状态
+make && make install                                                                                                            #安装
+if [$? -ne 0];then return $?                                                                                                    #返回状态
+/usr/local/nginx/sbin/nginx                                                                                                     #启动nginx
+netstat -antp | grep :80                                                                                                        #查看端口是否正常启动
+cd /usr/local/nginx/html/                                                                                                       #切换到网页目录
+echo -e '<?php\n echo "Hello Hangzhou Is so good";\n?>\n' > /usr/local/nginx/html/index.php                                     #建立php文件并写入
+#####################################################################Centos-Mysql#######################################################################
+user='mysql'
+group='mysql'
+user_exists=$(id -nu $user)
+if [ ! $user_exists ];then
+/usr/sbin/groupadd -f $group
+/usr/sbin/useradd -g $group $user -s /sbin/nologin -M
+fi
+yum -y install ncurses-devel                                                                                                    #安装数据库相关依赖
+wget http://downloads.mysql.com/archives/get/file/mysql-5.1.55.tar.gz                                                           #从官网下载软件包
+tar -xf mysql-5.1.55.tar.gz && cd mysql-5.1.55                                                                                  #解压并切换软件目录
+./configure --prefix=/usr/local/mysql --with-charset=utf8 --with-collation=utf8_general_ci --with-extra-charset=gbk.gb2312      #编译
+if [$? -ne 0];then return $?                                                                                                    #返回状态
+make && make install                                                                                                            #安装
+if [$? -ne 0];then return $?                                                                                                    #返回状态
+cp -a support-files/my-medium.cnf /etc/my.cnf                                                                                   #复制my.cnf配置文件
+ln -s /usr/local/mysql/bin/* /usr/local/bin/                                                                                    #链接目录
+ln -s /usr/local/mysql/lib/mysql/* /usr/lib                                                                                     #链接目录
+ln -s /usr/local/mysql/include/mysql/* /usr/include/                                                                            #链接目录
+mysql_install_db --user=mysql                                                                                                   #初始化数据库
+chown -R root:mysql /usr/local/mysql/                                                                                           #赋予权限
+chown -R mysql /usr/local/mysql/var/                                                                                            #赋予权限
+cd mysql-5.1.55/support-files/                                                                                                  #切换到解压目录下
+cp -a mysql.server /etc/init.d/mysqld                                                                                           #复制启动文件到开机自启动下
+chmod +x /etc/init.d/mysqld                                                                                                     #赋予执行权限
+service mysqld start                                                                                                            #开启服务
+netstat -antp | grep :3306                                                                                                      #过滤端口查看服务是否正常启动
+mysqladmin -uroot password "123456"                                                                                             #给数据库设置初始密码
+chkconfig --add mysqld                                                                                                          #添加mysql
+chkconfig --level 2345 mysqld on                                                                                                #开启2345权限
+#####################################################################Centos-php#############################################################################
+user='www'
+group='www'
+user_exists=$(id -nu $user)
+if [ !$user_exists ];then
+/usr/sbin/groupadd -f $group
+/usr/sbin/useradd -g $group $user -s /sbin/nologin -M
+fi
+yum -y install libxml2-devel libpng-devel                                                                                       #安装php相关依赖
+wget http://mirrors.sohu.com/php/php-5.6.12.tar.gz                                                                              #下载php软件包
+tar -xf php-5.6.12.tar.gz && cd php-5.6.12                                                                                      #解压并切换到软件目录
+ln -s /usr/lib64/libpng.so /usr/lib                                                                                             #链接目录
+./configure --prefix=/usr/local/php5 --with-gd --with-zlib --with-mysql=/usr/local/mysql/ --with-config-file-path=/usr/local/php5 --enable-mbstring --enable-fpm --enable-zip --with-curl  --with-openssl
+if [$? -ne 0];then return $?                                                                                                    #返回状态
+make && make install                                                                                                            #安装
+if [$? -ne 0];then return $?                                                                                                    #返回状态
+cp -a php.ini-development /usr/local/php5/php.ini                                                                               #复制ini文件
+ln -s /usr/local/php5/bin/* /usr/local/bin/                                                                                     #链接目录
+ln -s /usr/local/php5/sbin/* /usr/local/sbin/                                                                                   #链接目录
+cp /usr/local/php5/etc/php-fpm.conf.default /usr/local/php5/etc/php-fpm.conf                                                    #复制文件
+cp sapi/fpm/init.d.php-fpm /etc/init.d/php-fpm                                                                                  #移动文件在开机自启动下
+chmod +x /etc/init.d/php-fpm                                                                                                    #赋予执行权限
+service php-fpm restart                                                                                                         #启动php-fpm服务
+netstat -antp | grep :9000                                                                                                      #过滤端口查看是否正常启动
+chkconfig  --add php-fpm                                                                                                        #添加开机自启动
+chkconfig --level 2345 php-fpm on                                                                                               #设置2345开机启动
+
+###############################################################################################################################################################
+#####其余配置文件没修改#####
